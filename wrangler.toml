@@ -18,7 +18,7 @@
 # dashboard in production. See .dev.vars.example.
 # ===========================================================================
 
-name = "manga-manhwa-downloader"
+name = "manga-downloader-landing"
 main = "worker/index.ts"
 compatibility_date = "2024-09-02"
 
