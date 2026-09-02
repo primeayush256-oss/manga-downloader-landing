@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import Section from "./Section";
 import Reveal from "./Reveal";
+import PaymentStatusOverlay from "./payment/PaymentStatusOverlay";
 import { getSelectedPlanFromUrl } from "../utils/planQuery";
+import { useAuth } from "../context/AuthContext";
+import { usePayment } from "../hooks/usePayment";
+import { fetchPaymentStatus, type PaymentStatus } from "../lib/paymentApi";
 import {
   FREE_PAGES,
   PLANS,
@@ -18,10 +22,39 @@ export default function Pricing() {
      to null and the section renders in its normal state — that validation
      lives in getSelectedPlanFromUrl() and is covered by unit tests. */
   const [selectedPlan, setSelectedPlan] = useState<PlanId | null>(null);
+  const { isAuthenticated } = useAuth();
+  const payment = usePayment();
+
+  // Current entitlement, so an already-subscribed user sees "active" instead
+  // of an upgrade button. Premium is resolved server-side (never a client flag).
+  const [status, setStatus] = useState<PaymentStatus | null>(null);
 
   useEffect(() => {
     setSelectedPlan(getSelectedPlanFromUrl());
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (isAuthenticated) {
+      void fetchPaymentStatus().then((s) => {
+        if (active) setStatus(s);
+      });
+    } else {
+      setStatus(null);
+    }
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated]);
+
+  // After a successful payment, refresh entitlement so the UI reflects premium.
+  useEffect(() => {
+    if (payment.phase === "success" || payment.phase === "already_active") {
+      void fetchPaymentStatus().then((s) => setStatus(s));
+    }
+  }, [payment.phase]);
+
+  const alreadyPremium = status?.is_premium === true;
 
   return (
     <Section id="pricing" className="py-20 sm:py-28" aria-labelledby="pricing-heading">
@@ -73,8 +106,12 @@ export default function Pricing() {
               "Account-based access",
             ]}
             ctaLabel={PLANS.monthly.ctaLabel}
-            ctaHref="/signup?plan=monthly"
             ctaStyle="glass"
+            planId="monthly"
+            alreadyActive={alreadyPremium && status?.subscription_plan === "monthly"}
+            anyPlanActive={alreadyPremium}
+            busy={payment.phase !== "idle" && payment.activePlan === "monthly"}
+            onSelect={() => payment.startCheckout("monthly")}
           />
         </Reveal>
 
@@ -92,8 +129,12 @@ export default function Pricing() {
               "Account-based access",
             ]}
             ctaLabel={PLANS.yearly.ctaLabel}
-            ctaHref="/signup?plan=yearly"
             ctaStyle="accent"
+            planId="yearly"
+            alreadyActive={alreadyPremium && status?.subscription_plan === "yearly"}
+            anyPlanActive={alreadyPremium}
+            busy={payment.phase !== "idle" && payment.activePlan === "yearly"}
+            onSelect={() => payment.startCheckout("yearly")}
           />
         </Reveal>
       </div>
@@ -113,6 +154,16 @@ export default function Pricing() {
           — about {annualSavingPercent()}%.
         </p>
       </Reveal>
+
+      <PaymentStatusOverlay
+        phase={payment.phase}
+        error={payment.error}
+        activePlan={payment.activePlan}
+        onRetry={() => {
+          if (payment.activePlan) payment.startCheckout(payment.activePlan);
+        }}
+        onClose={payment.reset}
+      />
     </Section>
   );
 }
@@ -126,8 +177,14 @@ interface PricingCardProps {
   badge: string | null;
   features: string[];
   ctaLabel: string;
-  ctaHref: string;
   ctaStyle: "accent" | "glass";
+  /** Free card: a plain link. Paid cards: a checkout button. */
+  ctaHref?: string;
+  planId?: PlanId;
+  alreadyActive?: boolean;
+  anyPlanActive?: boolean;
+  busy?: boolean;
+  onSelect?: () => void;
 }
 
 function PricingCard({
@@ -139,9 +196,15 @@ function PricingCard({
   badge,
   features,
   ctaLabel,
-  ctaHref,
   ctaStyle,
+  ctaHref,
+  alreadyActive = false,
+  anyPlanActive = false,
+  busy = false,
+  onSelect,
 }: PricingCardProps) {
+  const buttonClass = ctaStyle === "accent" ? "btn-accent" : "btn-glass";
+
   return (
     <div
       className={`glass glass-sheen relative flex h-full flex-col rounded-[20px] p-7 transition-[transform,border-color,box-shadow] duration-300 ease-ease hover:-translate-y-1 hover:shadow-glass ${
@@ -215,13 +278,32 @@ function PricingCard({
         ))}
       </ul>
 
-      {/* TODO(payments-integration): route through Razorpay checkout in the next phase */}
-      <a
-        href={ctaHref}
-        className={`mt-7 w-full ${ctaStyle === "accent" ? "btn-accent" : "btn-glass"}`}
-      >
-        {ctaLabel}
-      </a>
+      {/* Free plan keeps its simple link. Paid plans open Razorpay checkout. */}
+      {ctaHref ? (
+        <a href={ctaHref} className={`mt-7 w-full ${buttonClass}`}>
+          {ctaLabel}
+        </a>
+      ) : alreadyActive ? (
+        <span
+          className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-good/40 bg-good/[0.1] py-3 text-sm font-semibold text-good"
+          aria-live="polite"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M2.8 7.2 5.6 10 11.2 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Your plan is active
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onSelect}
+          disabled={busy || anyPlanActive}
+          className={`mt-7 w-full ${buttonClass} disabled:cursor-not-allowed disabled:opacity-60`}
+          aria-busy={busy}
+        >
+          {busy ? "Starting checkout…" : anyPlanActive ? "Plan already active" : ctaLabel}
+        </button>
+      )}
     </div>
   );
 }

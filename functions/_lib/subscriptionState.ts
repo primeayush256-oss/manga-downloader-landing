@@ -96,3 +96,71 @@ export function statusForEvent(
     ? subscriptionStatus
     : HANDLED_EVENTS[eventType]) as string;
 }
+
+/** Shape of the Razorpay subscription entity fields the webhook consumes. */
+export interface RazorpaySubscriptionEntity {
+  id?: string;
+  status?: string;
+  current_start?: number | null; // epoch seconds
+  current_end?: number | null; // epoch seconds
+  end_at?: number | null; // epoch seconds — scheduled end (cancel at period end)
+  customer_id?: string | null;
+  [key: string]: unknown;
+}
+
+/** The arguments passed to apply_subscription_event, derived purely. */
+export interface EntitlementUpdate {
+  rzpStatus: string;
+  currentPeriodStartIso: string | null;
+  currentPeriodEndIso: string | null;
+  cancelAtPeriodEnd: boolean;
+  customerId: string | null;
+}
+
+function epochToIso(sec: number | null | undefined): string | null {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return null;
+  return new Date(sec * 1000).toISOString();
+}
+
+/**
+ * Pure translation of a webhook event + subscription entity into the values
+ * apply_subscription_event needs. This is where the "cancel at period end"
+ * grace decision is made, so it can be unit tested directly:
+ *
+ *   - On subscription.cancelled, if the subscription still has time left on
+ *     the current period (current_end / end_at in the future), we set
+ *     cancelAtPeriodEnd = true so cz_is_premium keeps the user premium until
+ *     the period ends. If it has already ended, cancelAtPeriodEnd = false and
+ *     premium drops immediately.
+ *   - For every other handled event, cancelAtPeriodEnd is false.
+ *
+ * Returns null for events we do not handle.
+ */
+export function buildEntitlementUpdateFromWebhook(
+  eventType: string,
+  sub: RazorpaySubscriptionEntity,
+  now: number = Date.now()
+): EntitlementUpdate | null {
+  const rzpStatus = statusForEvent(eventType, sub.status);
+  if (rzpStatus === null) return null;
+
+  const periodEndSec =
+    typeof sub.current_end === "number" && sub.current_end > 0
+      ? sub.current_end
+      : typeof sub.end_at === "number" && sub.end_at > 0
+        ? sub.end_at
+        : null;
+
+  let cancelAtPeriodEnd = false;
+  if (mapRazorpayStatus(rzpStatus) === "cancelled") {
+    cancelAtPeriodEnd = periodEndSec !== null && periodEndSec * 1000 > now;
+  }
+
+  return {
+    rzpStatus,
+    currentPeriodStartIso: epochToIso(sub.current_start),
+    currentPeriodEndIso: epochToIso(periodEndSec),
+    cancelAtPeriodEnd,
+    customerId: sub.customer_id ?? null,
+  };
+}

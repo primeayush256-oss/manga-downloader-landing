@@ -44,3 +44,35 @@ export async function getUserFromRequest(
   if (error || !data.user) return null;
   return { id: data.user.id, email: data.user.email ?? null };
 }
+
+/** A subset of user_entitlements used for duplicate detection + status display. */
+export interface EntitlementRow {
+  user_id: string;
+  subscription_status: string;
+  subscription_plan: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  razorpay_customer_id: string | null;
+  razorpay_subscription_id: string | null;
+}
+
+/**
+ * Reads a single user's entitlement row with the service-role client (bypasses
+ * RLS, read-only here). Returns null if the row does not exist yet.
+ */
+export async function getEntitlementRow(
+  env: PaymentsEnv,
+  userId: string
+): Promise<EntitlementRow | null> {
+  const admin = adminClient(env);
+  const { data, error } = await admin
+    .from("user_entitlements")
+    .select(
+      "user_id, subscription_status, subscription_plan, current_period_start, current_period_end, cancel_at_period_end, razorpay_customer_id, razorpay_subscription_id"
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as EntitlementRow;
+}

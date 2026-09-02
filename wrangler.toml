@@ -1,20 +1,34 @@
 # ===========================================================================
-# Cloudflare Pages configuration — Manga Manhwa Downloader landing page
+# Cloudflare Workers configuration — Manga Manhwa Downloader landing page
 # ===========================================================================
-# The static site (Vite build in ./dist) plus server-side API under
-# ./functions (Cloudflare Pages Functions). No deployment happens in this
-# phase — this file only declares the project so `wrangler pages dev` and, in
-# a later phase, `wrangler pages deploy` know how to run.
+# Deployed as a WORKER with Static Assets (the model `wrangler deploy` uses).
+#
+#   * The Vite build output in ./dist is served as static assets.
+#   * The API (Razorpay subscriptions + Supabase) is served by the Worker
+#     entry ./worker/index.ts, which routes /api/* to the shared handlers.
+#
+# Static assets take precedence for real files; anything else invokes the
+# Worker. `run_worker_first` guarantees /api/* always reaches the Worker, and
+# not_found_handling = "single-page-application" makes client-side routes
+# (e.g. /login, /reset-password) fall back to index.html.
 #
 # SECURITY: no secret values live here. Runtime secrets (Razorpay key secret,
-# Supabase service-role key, webhook secret, plan ids) are provided at runtime
-# via `.dev.vars` locally (gitignored) and `wrangler pages secret put` /
-# the Cloudflare dashboard in production. See .dev.vars.example.
+# Supabase service-role key, webhook secret, plan ids) are provided via
+# `.dev.vars` locally (gitignored) and `wrangler secret put` / the Cloudflare
+# dashboard in production. See .dev.vars.example.
 # ===========================================================================
 
 name = "manga-manhwa-downloader"
-pages_build_output_dir = "dist"
+main = "worker/index.ts"
 compatibility_date = "2024-09-02"
 
-# Enables the Node.js compatibility layer some libraries expect on Workers.
+# Enables the Node.js compatibility layer the Supabase client expects.
 compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# Deep links / client routes serve the SPA entry instead of a 404.
+not_found_handling = "single-page-application"
+# Always run the Worker for API paths, regardless of asset matching.
+run_worker_first = ["/api/*"]
