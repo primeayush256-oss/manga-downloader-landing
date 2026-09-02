@@ -1,0 +1,20 @@
+# ===========================================================================
+# Cloudflare Pages configuration — Manga Manhwa Downloader landing page
+# ===========================================================================
+# The static site (Vite build in ./dist) plus server-side API under
+# ./functions (Cloudflare Pages Functions). No deployment happens in this
+# phase — this file only declares the project so `wrangler pages dev` and, in
+# a later phase, `wrangler pages deploy` know how to run.
+#
+# SECURITY: no secret values live here. Runtime secrets (Razorpay key secret,
+# Supabase service-role key, webhook secret, plan ids) are provided at runtime
+# via `.dev.vars` locally (gitignored) and `wrangler pages secret put` /
+# the Cloudflare dashboard in production. See .dev.vars.example.
+# ===========================================================================
+
+name = "manga-manhwa-downloader"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-02"
+
+# Enables the Node.js compatibility layer some libraries expect on Workers.
+compatibility_flags = ["nodejs_compat"]

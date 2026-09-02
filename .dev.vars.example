@@ -1,0 +1,43 @@
+# ===========================================================================
+# Server-side secrets for Cloudflare Pages Functions — TEMPLATE
+# ===========================================================================
+# Copy this file to `.dev.vars` (which is gitignored) and fill in real TEST
+# MODE values for local development with `wrangler pages dev`.
+#
+# These are SERVER-ONLY. They are read via the Pages Functions `env` binding
+# and are never bundled into the browser. Do NOT prefix any of these with
+# VITE_, and do NOT put them in `.env` — anything Vite sees is public.
+#
+# In production, set the same names with:
+#   wrangler pages secret put <NAME>
+# or via Cloudflare Dashboard -> Pages -> project -> Settings -> Environment
+# variables (as "Secret").
+#
+# NEVER commit real values. This template contains placeholders only.
+# ---------------------------------------------------------------------------
+
+# --- Razorpay (TEST MODE) ---------------------------------------------------
+# Dashboard -> Settings -> API Keys (Test Mode). The Key ID is also sent to the
+# browser by the create-subscription endpoint (that is expected and safe). The
+# Key Secret is server-only and must never reach the client.
+RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxxx
+RAZORPAY_KEY_SECRET=your_test_key_secret_here
+
+# Razorpay Subscription Plan IDs (TEST MODE). Create the plans first (see
+# PAYMENT_SETUP.md), then paste their ids here. The browser never sees these;
+# it only sends {"plan":"monthly"} or {"plan":"yearly"} and the server maps it.
+#   monthly plan = INR 99 / month
+#   yearly  plan = INR 999 / year
+RAZORPAY_MONTHLY_PLAN_ID=plan_xxxxxxxxxxxxxx
+RAZORPAY_YEARLY_PLAN_ID=plan_xxxxxxxxxxxxxx
+
+# Webhook signing secret. Dashboard -> Settings -> Webhooks -> (your webhook).
+# Used to verify X-Razorpay-Signature over the RAW request body.
+RAZORPAY_WEBHOOK_SECRET=your_webhook_secret_here
+
+# --- Supabase (server-side) -------------------------------------------------
+# Same project as the extension (ref: kmvbqjlsiwhivxhmgdqt). The URL is public,
+# but the SERVICE ROLE key must stay server-only — it bypasses Row Level
+# Security and can write entitlements. Never expose it to the browser.
+SUPABASE_URL=https://kmvbqjlsiwhivxhmgdqt.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here

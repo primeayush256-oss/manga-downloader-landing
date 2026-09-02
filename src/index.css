@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===================================================================
+   Manga Manhwa Downloader — website base layer
+
+   Mirrors the extension's popup.css visual language: night-map navy
+   backdrop, translucent glass surfaces, route-blue accent. Tokens live
+   in tailwind.config.ts; this file wires up the base element styles and
+   the handful of composite surfaces reused across sections.
+   =================================================================== */
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    /* Sticky navbar offset so #anchor targets aren't hidden behind it */
+    scroll-padding-top: 6.5rem;
+  }
+
+  body {
+    @apply bg-void font-sans text-content antialiased;
+    -webkit-font-smoothing: antialiased;
+    /* Guards against any child overflowing and creating a sideways scroll */
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-sans;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid theme("colors.accent.soft");
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgba(63, 162, 255, 0.35);
+    color: theme("colors.content.DEFAULT");
+  }
+}
+
+@layer components {
+  /* ---------- the extension's .glass surface ---------- */
+  .glass {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border-radius: 16px;
+  }
+
+  /* A quieter variant for large panels, so whole sections don't read as
+     one giant glass blob. */
+  .glass-soft {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  /* Subtle top highlight — the "liquid" edge light on a glass panel. */
+  .glass-sheen {
+    position: relative;
+  }
+
+  .glass-sheen::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.22),
+      rgba(255, 255, 255, 0) 42%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* ---------- buttons, matching .btn from popup.css ---------- */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3
+      text-sm font-semibold text-white shadow-accent
+      transition-[transform,filter,box-shadow] duration-200 ease-spring;
+    background: linear-gradient(155deg, #3fa2ff 0%, #2170c9 100%);
+  }
+
+  .btn-accent:hover {
+    filter: brightness(1.08);
+  }
+
+  .btn-accent:active {
+    transform: scale(0.975);
+  }
+
+  .btn-glass {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3
+      text-sm font-semibold text-content
+      transition-[transform,background-color,border-color] duration-200 ease-spring;
+    background: rgba(255, 255, 255, 0.11);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .btn-glass:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.24);
+  }
+
+  .btn-glass:active {
+    transform: scale(0.975);
+  }
+
+  /* ---------- the extension's uppercase micro-label ---------- */
+  .eyebrow {
+    @apply text-[10px] font-extrabold uppercase tracking-[0.5px] text-content-faint;
+  }
+}
+
+@layer utilities {
+  /* Tabular figures for counters and prices, as the extension does. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scroll-reveal: hidden state, cleared by .is-revealed once the element
+     enters the viewport. Reduced-motion users get the revealed state
+     immediately (see the media query below). */
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+  }
+
+  .reveal.is-revealed {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ===================================================================
+   Reduced motion — mirrors the guard in the extension's popup.css.
+   Animations and transitions collapse; the reveal utility resolves to
+   its final state so no content is left invisible.
+   =================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ===================================================================
+   Forced colours / high contrast — keep glass panels distinguishable,
+   matching the approach already used in the extension's pricing.css.
+   =================================================================== */
+@media (forced-colors: active) {
+  .glass,
+  .glass-soft {
+    border: 1px solid ButtonBorder;
+  }
+}

@@ -1,0 +1,13 @@
+node_modules
+dist
+*.tsbuildinfo
+.DS_Store
+*.local
+.env
+.env.*
+
+# Cloudflare Pages / Wrangler
+.wrangler
+# Local server secrets for Pages Functions (Razorpay + Supabase service role).
+# NEVER commit this. The committable template is .dev.vars.example.
+.dev.vars
