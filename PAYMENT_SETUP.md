@@ -1,137 +1,159 @@
-# Payment Setup — Razorpay Subscriptions (Test Mode)
+# Payment Setup — Razorpay Subscriptions
 
 This landing page sells two **subscription** plans for the Manga Manhwa
-Downloader extension and updates the **same** Supabase project the extension
-already uses (`kmvbqjlsiwhivxhmgdqt`). Payment is handled by **Razorpay
-Subscriptions**; entitlement is written **server-side only**.
+Downloader extension, updating the **same** Supabase project the extension
+uses (`kmvbqjlsiwhivxhmgdqt`). Payment is handled by **Razorpay Subscriptions**;
+entitlement is written **server-side only**.
 
-> This file contains **no secrets** — only variable names, placeholders, and
-> steps. Never commit real keys.
+Production URL: `https://manga-downloader-landing.primeayush256.workers.dev`
 
-Fixed pricing (do not change): **Monthly ₹99/month**, **Yearly ₹999/year**.
-Free tier stays at exactly **20 page downloads per account** (no time trial).
+> **This file contains no secrets** — only variable names, placeholders, and
+> steps. Never commit real keys. Never paste secrets into chat.
+
+Confirmed pricing (do not change):
+- **Monthly ₹99/month** — 9900 paise
+- **Yearly ₹999/year** — 99900 paise
+- **Free tier** = exactly 20 page downloads per account (no time trial)
 
 ---
 
 ## Architecture at a glance
 
 ```
-Pricing card (browser)  ──sends only {plan:"monthly"|"yearly"}──▶  /api/payments/create-subscription
-                                                                       │  (server maps plan→plan id, price)
+Pricing card (browser)  ──sends only {plan:"monthly"|"yearly"}──▶  POST /api/payments/create-subscription
+                                                                       │  (server maps plan name → plan id, amount)
                                                                        ▼
                                                             Razorpay: create Subscription
-                                                                       │
+                                                                       │  returns {subscription_id, key_id (public)}
         Razorpay Checkout (public Key ID + subscription_id)  ◀─────────┘
-                    │ returns payment_id, subscription_id, signature
+                    │ returns {payment_id, subscription_id, signature}
                     ▼
-            /api/payments/verify  ──HMAC(payment_id|subscription_id, KEY_SECRET)──▶ verified? then read live sub
-                    │                                                                      │
-                    ▼                                                                      ▼
-        Razorpay ──webhook──▶ /api/webhooks/razorpay ──verify raw-body HMAC──▶ apply_subscription_event()
-                                                                                          │ (service role)
-                                                                                          ▼
-                                                                         Supabase user_entitlements
-                                                                                          │
-                                                              extension get_entitlement() reads premium
+            POST /api/payments/verify
+                    │  server: HMAC(payment_id|subscription_id, KEY_SECRET)
+                    │  → verified? read live sub from Razorpay → apply_subscription_event RPC
+                    ▼
+        Razorpay ──webhook──▶ POST /api/webhooks/razorpay
+                    │  server: HMAC(rawBody, WEBHOOK_SECRET) → idempotency insert → apply_subscription_event RPC
+                    ▼
+              Supabase user_entitlements  (subscription_status, cancel_at_period_end, …)
+                    │
+          cz_is_premium() derives premium state  ←  extension get_entitlement() reads same row
 ```
 
 The webhook is the **authoritative** source of entitlement. `verify` gives the
 user instant feedback but never grants premium on the browser's word — it only
-proceeds after the server confirms the signature.
+proceeds after the server confirms the HMAC signature.
 
 ---
 
-## 1. Razorpay Test Mode
+## Public vs secret — which is which
 
-1. Log in to the Razorpay Dashboard and switch to **Test Mode** (toggle, top).
-2. **Settings → API Keys → Generate Test Key.** Copy the **Key ID**
+| Variable | Classification | Where it lives |
+|----------|---------------|----------------|
+| `RAZORPAY_KEY_ID` | **Public** — sent to Razorpay Checkout in the browser | Cloudflare Runtime Variable |
+| `RAZORPAY_MONTHLY_PLAN_ID` | Config — server-only (never exposed to browser) | Cloudflare Runtime Variable or Secret |
+| `RAZORPAY_YEARLY_PLAN_ID` | Config — server-only | Cloudflare Runtime Variable or Secret |
+| `RAZORPAY_KEY_SECRET` | **Secret** — server HMAC verification only | Cloudflare **Secret** |
+| `RAZORPAY_WEBHOOK_SECRET` | **Secret** — webhook HMAC verification only | Cloudflare **Secret** |
+| `SUPABASE_URL` | Public — project URL | Cloudflare Runtime Variable |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — bypasses RLS, server only | Cloudflare **Secret** |
+| `VITE_SUPABASE_URL` | Public — baked into frontend build | Cloudflare Build Variable |
+| `VITE_SUPABASE_ANON_KEY` | Public anon key — baked into frontend build | Cloudflare Build Variable |
+
+`RAZORPAY_KEY_ID` is the **only** Razorpay credential that reaches the browser
+(via the server's `create-subscription` response). It is the public key, which
+Razorpay Checkout requires. Every other credential stays server-side.
+
+---
+
+## Step 1 — Razorpay Test Mode (do this first)
+
+1. Log in to [dashboard.razorpay.com](https://dashboard.razorpay.com) and switch
+   to **Test Mode** (toggle, top-right).
+2. **Settings → API Keys → Generate Test Key**. Copy the **Key ID**
    (`rzp_test_…`) and **Key Secret**. The secret is shown once — store it in
    your password manager, not in this repo.
+3. Set `RAZORPAY_KEY_ID = rzp_test_<your-test-id>` in Cloudflare (Step 4).
 
-## 2. Create the Monthly plan (₹99/month)
+> Complete all testing in Test Mode before switching to the Live Key ID.
 
-**Subscriptions → Plans → Create Plan** (in Test Mode):
+---
 
-- Billing frequency: **Monthly**, interval **1**
-- Amount: **₹99** (Razorpay stores this as **9900 paise**)
-- Currency: **INR**
-- Description: `Manga Manhwa Downloader — Monthly`
+## Step 2 — Create the Monthly plan (Test Mode)
+
+**Subscriptions → Plans → + Create Plan**:
+
+| Field | Value |
+|-------|-------|
+| Billing frequency | Monthly |
+| Interval | 1 |
+| Amount | ₹99 (9900 paise) |
+| Currency | INR |
+| Description | `Manga Manhwa Downloader — Monthly` |
 
 Copy the resulting **Plan ID** (`plan_…`).
 
-## 3. Create the Yearly plan (₹999/year)
+---
 
-Create a second plan:
+## Step 3 — Create the Yearly plan (Test Mode)
 
-- Billing frequency: **Yearly**, interval **1**
-- Amount: **₹999** (**99900 paise**)
-- Currency: **INR**
-- Description: `Manga Manhwa Downloader — Yearly`
+**Subscriptions → Plans → + Create Plan**:
 
-Copy this **Plan ID** too.
+| Field | Value |
+|-------|-------|
+| Billing frequency | Yearly |
+| Interval | 1 |
+| Amount | ₹999 (99900 paise) |
+| Currency | INR |
+| Description | `Manga Manhwa Downloader — Yearly` |
 
-> There is no admin script that creates plans, on purpose: creating plans
-> requires the Key Secret, which must never sit in a runnable script in this
-> repo. Create them once in the dashboard and paste the two IDs into config.
+Copy the resulting **Plan ID** (`plan_…`).
 
-## 4. Where the Plan IDs and secrets go
+> Plans are created in the Razorpay Dashboard — no script creates them, because
+> doing so would require the Key Secret in a runnable file.
 
-All payment secrets are **server-side** environment variables for the
-Cloudflare Pages Functions — never `VITE_*`, never in `.env`, never in the
-browser bundle.
+---
 
-**Local development** — copy `.dev.vars.example` to `.dev.vars` (gitignored)
-and fill in Test Mode values:
+## Step 4 — Configure Cloudflare Workers runtime variables
+
+Go to **Cloudflare Dashboard → Workers & Pages → manga-downloader-landing →
+Settings → Variables and Secrets**.
+
+### Runtime Variables (not secret, but server-only — do NOT use VITE_*)
 
 | Variable | Value |
-| --- | --- |
-| `RAZORPAY_KEY_ID` | `rzp_test_…` |
-| `RAZORPAY_KEY_SECRET` | test key secret |
-| `RAZORPAY_MONTHLY_PLAN_ID` | `plan_…` (monthly) |
-| `RAZORPAY_YEARLY_PLAN_ID` | `plan_…` (yearly) |
-| `RAZORPAY_WEBHOOK_SECRET` | see step 6 |
+|----------|-------|
+| `RAZORPAY_KEY_ID` | `rzp_test_…` (Test) or `rzp_live_…` (Live) |
 | `SUPABASE_URL` | `https://kmvbqjlsiwhivxhmgdqt.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role (secret) |
 
-**Production** — set each with
-`wrangler pages secret put <NAME>` or Cloudflare Dashboard → Pages → project →
-Settings → Environment variables (mark as **Secret**).
+### Runtime Secrets (encrypted, set as "Secret" type)
 
-The browser only ever receives the **public Key ID** (needed by Checkout) — it
-is returned by `create-subscription`. The Key Secret, webhook secret, and
-Supabase service-role key stay on the server.
+| Secret | Where to get it |
+|--------|----------------|
+| `RAZORPAY_KEY_SECRET` | Razorpay Dashboard → Settings → API Keys |
+| `RAZORPAY_MONTHLY_PLAN_ID` | Plan ID from Step 2 |
+| `RAZORPAY_YEARLY_PLAN_ID` | Plan ID from Step 3 |
+| `RAZORPAY_WEBHOOK_SECRET` | Set when creating the webhook (Step 5) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project → Settings → API → `service_role` |
 
-## 5. Apply the database migration
+> **Do not put these into `.env`, `wrangler.toml`, source code, or Git.**
+> The `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` Build Variables are
+> separate — they are already configured and must not be confused with the
+> server-side variables above.
 
-The subscription write-path migration reuses the extension's existing
-`user_entitlements` table and adds a server-only webhook ledger + writer
-functions:
+---
 
-```
-supabase/migrations/20260902090000_razorpay_subscriptions.sql
-```
+## Step 5 — Configure the webhook (Test Mode)
 
-Apply it to the shared project with the Supabase CLI (from this folder, once
-you are ready — this was **not** run automatically):
-
-```bash
-supabase db push
-```
-
-It creates `razorpay_webhook_events` (idempotency) and the
-`link_pending_subscription` / `apply_subscription_event` functions. Both are
-`SECURITY DEFINER` and are **not** granted to `anon`/`authenticated`; only the
-service-role key can call them.
-
-## 6. Webhook setup
-
-1. **Settings → Webhooks → Add New Webhook** (Test Mode).
-2. **URL:** `https://<your-pages-domain>/api/webhooks/razorpay`
-   (locally, expose `wrangler pages dev` via a tunnel — see step 7).
-3. **Secret:** set any strong random string. Put the **same** value in
-   `RAZORPAY_WEBHOOK_SECRET`. The endpoint verifies `X-Razorpay-Signature`
-   over the **raw** request body with this secret.
-4. **Active events** (subscribe to all of these):
+1. **Razorpay Dashboard → Settings → Webhooks → + Add New Webhook** (in Test Mode).
+2. **Webhook URL:**
+   ```
+   https://manga-downloader-landing.primeayush256.workers.dev/api/webhooks/razorpay
+   ```
+3. **Secret:** generate a strong random string (32+ characters). Enter it here
+   AND save it as `RAZORPAY_WEBHOOK_SECRET` in Cloudflare (Step 4). Never
+   commit this value.
+4. **Active events** — subscribe to all of these:
    - `subscription.authenticated`
    - `subscription.activated`
    - `subscription.charged`
@@ -142,66 +164,166 @@ service-role key can call them.
    - `subscription.paused`
    - `subscription.resumed`
 
-## 7. Local development
+---
+
+## Step 6 — Apply the Supabase migration
+
+The Razorpay subscription write path requires two SECURITY DEFINER functions
+and a webhook idempotency table in the Supabase project. Apply the migration:
 
 ```bash
-npm install
-npm run build          # produces dist/ (Pages serves it)
-npx wrangler pages dev # serves dist/ + functions/ with .dev.vars loaded
+cd "E:\APP\Landing page\manga downloader landing page"
+supabase db push
 ```
 
-`wrangler pages dev` runs the API under `/api/*` alongside the static site.
-For Razorpay to reach your local webhook, expose it with a tunnel (e.g.
-`cloudflared tunnel --url http://localhost:8788`) and use that HTTPS URL in the
-webhook config. `npm run dev` (plain Vite) serves the UI but **not** the API.
+Migration file:
+```
+supabase/migrations/20260902090000_razorpay_subscriptions.sql
+```
 
-## 8. Test payment procedure
+**Important:** the foundation migration (`20260901120000_monetization_foundation.sql`)
+from the Chrome extension's Supabase project must already be applied. It creates
+`user_entitlements`, `cz_is_premium`, and the free-page reservation system that
+this migration builds on. If it isn't in the project's migration history, apply it
+from `E:\APP\MANGA DOWNLOADER\supabase\migrations\` **without** modifying any
+extension source files.
 
-1. Sign in on the site (Supabase auth from the previous phase).
-2. Open **Pricing**, click **Get monthly** or **Get yearly**.
-3. Razorpay Checkout opens. Use a **Test Mode** card, e.g. Razorpay's test
-   card `4111 1111 1111 1111`, any future expiry, any CVV, and complete any
-   test OTP prompt.
-4. On success the page calls `/api/payments/verify`; after the server verifies
-   the signature you see **"Unlimited access is active."**
-5. The `subscription.activated` / `subscription.charged` webhook confirms and
-   persists the entitlement authoritatively.
-6. Cancel/expiry can be simulated from the Razorpay Dashboard (or via test
-   webhooks) to confirm premium drops correctly (see below).
+---
 
-Do **not** use real cards or Live Mode in this phase.
+## Step 7 — Local development
 
-## 9. How entitlement is updated
+```bash
+# 1. Copy the secret template and fill in Test Mode values
+cp .dev.vars.example .dev.vars
+# (edit .dev.vars — fill in rzp_test_ credentials, test plan IDs, webhook secret)
+
+# 2. Build the frontend
+npm run build
+
+# 3. Run the local Worker (serves dist/ + /api/* routes with .dev.vars secrets)
+npx wrangler pages dev
+```
+
+For Razorpay to deliver webhooks to your local machine, expose the dev server
+via a tunnel:
+
+```bash
+cloudflared tunnel --url http://localhost:8788
+# Use the generated HTTPS URL as the temporary webhook URL in Razorpay Dashboard
+```
+
+`npm run dev` (Vite only) serves the UI without the Worker API — use
+`wrangler pages dev` for end-to-end local testing.
+
+---
+
+## Step 8 — Test payment procedure
+
+1. Open the site and sign in with a Supabase account.
+2. Go to **Pricing** and click **Get monthly** or **Get yearly**.
+3. Razorpay Checkout opens (Test Mode).
+4. Use a Razorpay test card:
+   - Card: `4111 1111 1111 1111`
+   - Expiry: any future date
+   - CVV: any 3 digits
+   - OTP: `1234` (Razorpay test OTP)
+5. On success, the page calls `POST /api/payments/verify`. After the server
+   verifies the HMAC signature, **"Unlimited access is active"** is displayed.
+6. Within a few seconds, Razorpay fires the `subscription.activated` /
+   `subscription.charged` webhook to the production URL.
+7. The webhook handler verifies the signature, inserts an idempotency row, and
+   calls `apply_subscription_event` to persist premium status.
+
+---
+
+## Step 9 — How entitlement works
 
 - `user_entitlements` holds `subscription_status`, `subscription_plan`,
-  `current_period_start/end`, `cancel_at_period_end`, and the Razorpay ids.
-- Premium is **derived** by the existing `cz_is_premium(...)` — it is never a
-  stored boolean the client can flip. Premium = period not ended **and**
-  (`active`, or `cancelled` with `cancel_at_period_end`).
-- On **cancel at period end**, premium is retained until `current_period_end`,
-  then drops automatically.
-- The extension reads the same row via `get_entitlement()`, so after payment
-  the user just refreshes the extension to see unlimited access.
+  `current_period_start/end`, `cancel_at_period_end`, and the Razorpay IDs.
+- Premium = `subscription_status = 'active'` OR `(status = 'cancelled' AND
+  cancel_at_period_end = true AND current_period_end > now())`.
+- `past_due` (payment failed, retrying) and `expired`/`completed` are **not
+  premium**.
+- On **cancel at period end**: premium remains active until `current_period_end`.
+  After that date `cz_is_premium` returns false — no manual intervention needed.
+- The Chrome extension reads the same `user_entitlements` row via
+  `get_entitlement()`. After a successful payment, the user refreshes the
+  extension to see unlimited access immediately.
 
-## 10. Security notes
+---
 
-- No secret is in the client bundle (verified: `dist` contains no
-  `service_role`, `KEY_SECRET`, `WEBHOOK_SECRET`, or `plan_…` id).
-- The browser sends only the plan **name**; the server fixes price and plan id.
-- Identity always comes from the verified Supabase JWT, never a body `user_id`.
-- Webhook signatures are checked over the **raw** body; processing is
-  idempotent (unique `event_id`) and monotonic (stale events cannot downgrade
-  newer state).
+## Step 10 — Signature verification details
 
-## 11. Production go-live checklist
+### Subscription checkout (POST /api/payments/verify)
 
-- [ ] Recreate both plans in **Live Mode**; copy the live Plan IDs.
-- [ ] Set live `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` (and live plan IDs) as
-      Cloudflare Pages **secrets** — never in the repo.
-- [ ] Create a **Live Mode** webhook to the production
-      `/api/webhooks/razorpay` URL with a fresh `RAZORPAY_WEBHOOK_SECRET`.
-- [ ] Set the production `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret.
-- [ ] Run `supabase db push` against the production project (migration applied).
-- [ ] Confirm the extension reads premium after a real charge.
-- [ ] Rotate any secret that was ever pasted outside a secret store.
 ```
+HMAC_SHA256(
+  key   = RAZORPAY_KEY_SECRET,
+  input = razorpay_payment_id + "|" + razorpay_subscription_id
+)
+=== razorpay_signature (constant-time comparison)
+```
+
+### Webhook (POST /api/webhooks/razorpay)
+
+```
+HMAC_SHA256(
+  key   = RAZORPAY_WEBHOOK_SECRET,
+  input = raw request body bytes (never re-serialized)
+)
+=== X-Razorpay-Signature header (constant-time comparison)
+```
+
+Both use `crypto.subtle` (Web Crypto) — available on Cloudflare Workers and
+Node 18+. Both use a bitwise-XOR constant-time comparison to avoid timing
+side-channels.
+
+---
+
+## Step 11 — Switching to Live Mode
+
+**Do not switch to Live Mode until Test Mode end-to-end testing is complete.**
+
+When ready:
+
+1. Switch the Razorpay Dashboard to **Live Mode**.
+2. Re-create both plans (Monthly ₹99, Yearly ₹999) in Live Mode exactly as in
+   Steps 2–3. Copy the new Live Plan IDs.
+3. Create a new Live Mode webhook pointing to the same production URL, with a
+   new fresh webhook secret.
+4. In Cloudflare Dashboard, update these **Runtime Variables/Secrets**:
+
+   | Variable/Secret | Live value |
+   |-----------------|-----------|
+   | `RAZORPAY_KEY_ID` | `rzp_live_TLkyT5t1fpLSOZ` |
+   | `RAZORPAY_KEY_SECRET` | Live Key Secret (from Razorpay Dashboard) |
+   | `RAZORPAY_MONTHLY_PLAN_ID` | Live monthly plan ID |
+   | `RAZORPAY_YEARLY_PLAN_ID` | Live yearly plan ID |
+   | `RAZORPAY_WEBHOOK_SECRET` | New live webhook secret |
+
+5. Trigger a Cloudflare redeploy (push a commit or use the dashboard Retry).
+6. Verify with a real card using a small test charge if Razorpay provides a
+   live test path, or proceed carefully with a real ₹1 charge that you
+   immediately cancel.
+7. Rotate the Test Mode secrets if they were ever exposed.
+
+> The `RAZORPAY_KEY_ID = rzp_live_TLkyT5t1fpLSOZ` value is the Live public Key
+> ID. It is safe to use as a runtime variable — it only identifies your Razorpay
+> account to Checkout and carries no privileges. The **Live Key Secret** is what
+> must remain exclusively in Cloudflare Secrets, never in source code or chat.
+
+---
+
+## Step 12 — Security checklist
+
+- [ ] No `RAZORPAY_KEY_SECRET` in source code, `.env`, or Git
+- [ ] No `RAZORPAY_WEBHOOK_SECRET` in source code, `.env`, or Git
+- [ ] No `SUPABASE_SERVICE_ROLE_KEY` in source code, `.env`, or Git
+- [ ] No `RAZORPAY_MONTHLY_PLAN_ID` / `RAZORPAY_YEARLY_PLAN_ID` in client bundle
+- [ ] `RAZORPAY_KEY_ID` is the only Razorpay value the browser receives
+- [ ] `RAZORPAY_KEY_ID` reaches the browser via server response, not Vite build
+- [ ] Webhook signature verified over raw body before any parsing
+- [ ] Webhook idempotency via unique `event_id` in `razorpay_webhook_events`
+- [ ] User identity resolved from verified JWT, never from request body
+- [ ] Plan ID and price controlled entirely server-side
+- [ ] Premium derived by SQL `cz_is_premium`, never a stored boolean
