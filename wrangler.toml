@@ -12,8 +12,10 @@
 # not_found_handling = "single-page-application" makes client-side routes
 # (e.g. /login, /reset-password) fall back to index.html.
 #
-# SECURITY: no secret values live here. Runtime secrets (Razorpay key secret,
-# Supabase service-role key, webhook secret, plan ids) are provided via
+# SECURITY: no SECRET values live here. Non-secret runtime config (public
+# Razorpay Key ID, Plan IDs, public Supabase URL) is declared in [vars] below
+# so CI deploys bind it reliably. The three real secrets (Razorpay Key Secret,
+# Razorpay Webhook Secret, Supabase service-role key) are provided via
 # `.dev.vars` locally (gitignored) and `wrangler secret put` / the Cloudflare
 # dashboard in production. See .dev.vars.example.
 # ===========================================================================
@@ -24,6 +26,26 @@ compatibility_date = "2024-09-02"
 
 # Enables the Node.js compatibility layer the Supabase client expects.
 compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# Runtime plaintext variables (NON-SECRET, safe to commit).
+# ---------------------------------------------------------------------------
+# These four are public values: the public Razorpay Key ID, the two Razorpay
+# subscription Plan IDs, and the public Supabase project URL. Declaring them
+# here (rather than only in the dashboard) means every GitHub-connected
+# `wrangler deploy` binds them to the deployed Worker version. Dashboard-only
+# plaintext vars are dropped by a CI `wrangler deploy`, which is why the live
+# Worker was missing them and the payment API returned "not_configured".
+#
+# The three real SECRETS — RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET and
+# SUPABASE_SERVICE_ROLE_KEY — are deliberately NOT here. They remain Cloudflare
+# Secrets (set via the dashboard / `wrangler secret put`) and persist across
+# deploys. Never put a secret in this file.
+[vars]
+RAZORPAY_KEY_ID = "rzp_live_TLkyT5t1fpLSOZ"
+RAZORPAY_MONTHLY_PLAN_ID = "plan_TXtpNmhT9375ZS"
+RAZORPAY_YEARLY_PLAN_ID = "plan_TXtptI6qoSO5aq"
+SUPABASE_URL = "https://kmvbqjlsiwhivxhmgdqt.supabase.co"
 
 [assets]
 directory = "./dist"
