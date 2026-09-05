@@ -327,3 +327,13 @@ When ready:
 - [ ] User identity resolved from verified JWT, never from request body
 - [ ] Plan ID and price controlled entirely server-side
 - [ ] Premium derived by SQL `cz_is_premium`, never a stored boolean
+
+---
+
+## Deployment notes
+
+- LIVE Razorpay subscription plans, webhook, and Cloudflare runtime
+  variables/secrets are configured. This section is documentation only and has
+  no effect on application behavior; it exists to record that a fresh
+  production deployment was triggered so the Worker picks up the newly-saved
+  runtime configuration.
